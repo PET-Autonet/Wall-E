@@ -19,6 +19,18 @@ BluetoothSerial SerialBT;
 bool dispositivoConectado = false;
 const int sizeaudio = 3;
 
+/*####################################### BLUETOOTH ################################################*/
+#define RED_PIN 14
+#define GREEN_PIN 27
+#define BLUE_PIN 13
+const int MAX_MSG_LENGTH = 64;
+char receivedMessage[MAX_MSG_LENGTH];
+bool newMessage = false;
+char command;
+
+#include "RGB.h"
+/*#####################################################################################################*/
+
 /*####################################### DISPLAY_OLED ################################################*/
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
@@ -57,7 +69,7 @@ int tempomusic;
 // Configurando o driver PCA9685 na comunicação I2C padrão
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(); // Instanciando objetos com a classe Adafruit_PWMServoDriver.
 
-int graucabeca = 165;     // Variável de controle do grau do servo motor da cabeça (servo do canal 4)
+int graucabeca = 100;     // Variável de controle do grau do servo motor da cabeça (servo do canal 4)
 int graupescoco = 0;      // Variável que controla qual movimento o pescoço fará
 int olhodireito = 40;     // Variável que controla o angulo do servo motor do olho direito (servo do canal 5)
 int olhoesquerdo = 180;   // Variável que controla o angulo do servo motor do olho esquerdo (servo do canal 6)
@@ -93,6 +105,13 @@ void setup()
   {
     pinMode(IN[i], OUTPUT);
   }
+
+  pinMode(RED_PIN, OUTPUT);
+  pinMode(GREEN_PIN, OUTPUT);
+  pinMode(BLUE_PIN, OUTPUT);
+  analogWrite(RED_PIN, 128);
+  analogWrite(GREEN_PIN, 128);
+  analogWrite(BLUE_PIN, 128);
 
   while (!Serial)
     ; // Aguarda o Serial estar pronto (opcional, útil em alguns casos)
@@ -139,12 +158,21 @@ void loop()
       dispositivoConectado = true;
       // Coloque aqui qualquer código que deve rodar APENAS QUANDO CONECTA
     }
-    if (SerialBT.available())
+    readSerialData();
+    if (newMessage)
     {
-      char command = SerialBT.read(); // Lê o comando enviado pelo aplicativo
-      Serial.print("Comando recebido: ");
-      Serial.println(command);
-      controlWalle(command); // Chama a função para controlar o carrinho
+      Serial.println(receivedMessage);
+      if (strlen(receivedMessage) == 2)
+      {
+        command = receivedMessage[1]; // Pegamos o primeiro caractere como comando
+        Serial.print(command);
+        controlWalle(command);
+      }
+      else
+      {
+        processRGBCommand(receivedMessage);
+      }
+      newMessage = false;
     }
   }
   else
@@ -160,12 +188,81 @@ void loop()
     }
     Parar(velocidade1);
   }
-  delay(20);
+  delay(10);
+}
+
+void readSerialData()
+{
+  static byte index = 1;
+  static bool isRGBCommand = false;
+  char caracter;
+  receivedMessage[0] = 'z';
+
+  while (SerialBT.available() && !newMessage)
+  {
+    caracter = SerialBT.read();
+
+    // Se for o primeiro caractere e for 'R' seguido de um número, é um comando RGB
+    if (index == 1 && caracter == 'R' && SerialBT.peek() >= '0' && SerialBT.peek() <= '9')
+    {
+      isRGBCommand = true;
+    }
+
+    // Se for '/' e estivermos processando um comando RGB
+    if (caracter == '/' && isRGBCommand)
+    {
+      receivedMessage[index] = '\0';
+      index = 1;
+      newMessage = true;
+      isRGBCommand = false;
+      return;
+    }
+    // Se for '/' normal (não RGB)
+    else if (caracter == '/' && !isRGBCommand)
+    {
+      receivedMessage[1] = '/';
+      receivedMessage[2] = '\0';
+      index = 1;
+      newMessage = true;
+      return;
+    }
+
+    // Se estiver processando um comando RGB, continue acumulando caracteres
+    if (isRGBCommand)
+    {
+      if (index < MAX_MSG_LENGTH - 1)
+      {
+        receivedMessage[index] = caracter;
+        index++;
+      }
+    }
+    // Para comandos não-RGB, processe normalmente
+    else if (caracter != receivedMessage[index - 1])
+    {
+      Serial.print("Caractere recebido: ");
+      Serial.println(caracter);
+
+      if (index < MAX_MSG_LENGTH - 1)
+      {
+        receivedMessage[index] = caracter;
+        index++;
+        newMessage = true;
+      }
+    }
+  }
 }
 
 // Função para controlar o carrinho
 void controlWalle(char command)
 {
+  // Verifica primeiro se é um comando RGB
+  if (strlen(receivedMessage) > 2 && receivedMessage[1] == 'R' &&
+      isdigit(receivedMessage[2])) // Se começa com 'R' e tem um número depois
+  {
+    processRGBCommand(receivedMessage);
+    return; // Sai da função após processar o comando RGB
+  }
+
   while (command == 'F')
   {
     aceleracao1 += 5;
@@ -176,13 +273,30 @@ void controlWalle(char command)
     velocidade1 = aceleracao1;
     Frente(velocidade1);
     tipoMovimento = 0;
-    Serial.println("Movendo  para frente");
     delay(50);
-    if (SerialBT.available())
+
+    readSerialData();
+    if (newMessage)
     {
-      command = SerialBT.read(); // Lê o comando enviado pelo aplicativo
+      if (receivedMessage[1] == '/')
+      {
+        Serial.println("Parando movimento para frente");
+        command = ' ';
+        newMessage = false;
+        velocidade1 = 0;
+        break;
+      }
+      newMessage = false;
+    }
+    if (!SerialBT.connected())
+    {
+      command = ' ';
+      velocidade1 = 0;
+      break;
     }
   }
+
+  // Movimento para Trás
   while (command == 'B')
   {
     aceleracao1 += 5;
@@ -191,26 +305,94 @@ void controlWalle(char command)
       aceleracao1 = 200;
     }
     velocidade1 = aceleracao1;
+    Serial.println(velocidade1);
     Tras(velocidade1);
     tipoMovimento = 1;
-    Serial.println("Movendo  para trás");
     delay(50);
-    if (SerialBT.available())
+
+    readSerialData();
+    if (newMessage)
     {
-      command = SerialBT.read(); // Lê o comando enviado pelo aplicativo
+      if (receivedMessage[1] == '/')
+      {
+        Serial.println("Parando movimento para trás");
+        Serial.println(velocidade1);
+        command = ' ';
+        newMessage = false;
+        velocidade1 = 0;
+        break;
+      }
+      newMessage = false;
+    }
+    if (!SerialBT.connected())
+    {
+      command = ' ';
+      velocidade1 = 0;
+      break;
     }
   }
+
+  // Cabeça para Direita
+  while (command == 'C')
+  {
+    Olhardireita();
+    delay(50);
+
+    readSerialData();
+    if (newMessage)
+    {
+      if (receivedMessage[1] == '/')
+      {
+        Serial.println("Parando movimento da cabeça");
+        command = ' ';
+        newMessage = false;
+        break;
+      }
+      newMessage = false;
+    }
+    if (!SerialBT.connected())
+    {
+      command = ' ';
+      break;
+    }
+  }
+
+  // Cabeça para Esquerda
+  while (command == 'S')
+  {
+    Olharesquerda();
+    delay(50);
+
+    readSerialData();
+    if (newMessage)
+    {
+      if (receivedMessage[1] == '/')
+      {
+        Serial.println("Parando movimento da cabeça");
+        command = ' ';
+        newMessage = false;
+        break;
+      }
+      newMessage = false;
+    }
+    if (!SerialBT.connected())
+    {
+      command = ' ';
+      break;
+    }
+  }
+
   switch (command)
   {
-  case 'L': // Esquerda
-    Esquerda(velocidade);
+  case 'L':
     tipoMovimento = 2;
+    Esquerda(velocidade);
     Serial.println("Virando para esquerda");
     break;
 
-  case 'R': // Direita
-    Direita(velocidade);
+  case 'R':
     tipoMovimento = 3;
+    Direita(velocidade);
     Serial.println("Virando para direita");
     break;
 
@@ -221,14 +403,6 @@ void controlWalle(char command)
   case 'X': // Forward -> próxima música
     AudioTela();
     TocandoAudio();
-    break;
-
-  case 'C':
-    Olhardireita();
-    break;
-
-  case 'S':
-    Olharesquerda();
     break;
 
   case 'G':
@@ -264,6 +438,7 @@ void controlWalle(char command)
 
   default:
     Serial.println("Comando inválido");
+    Serial.println(velocidade1);
     Parar(velocidade1);
     aceleracao1 = 100;
     break;
