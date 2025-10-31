@@ -65,6 +65,7 @@ void Parar(int intensidade)
       }
       delay(30);
     }
+    velocidade1 = 0;
   }
 
   if (tipoMovimento == 1)
@@ -84,6 +85,7 @@ void Parar(int intensidade)
       }
       delay(30);
     }
+    velocidade1 = 0;
   }
 
   if (tipoMovimento == 2)

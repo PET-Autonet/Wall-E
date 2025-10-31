@@ -283,7 +283,6 @@ void controlWalle(char command)
         Serial.println("Parando movimento para frente");
         command = ' ';
         newMessage = false;
-        velocidade1 = 0;
         break;
       }
       newMessage = false;
@@ -291,7 +290,6 @@ void controlWalle(char command)
     if (!SerialBT.connected())
     {
       command = ' ';
-      velocidade1 = 0;
       break;
     }
   }
@@ -319,7 +317,6 @@ void controlWalle(char command)
         Serial.println(velocidade1);
         command = ' ';
         newMessage = false;
-        velocidade1 = 0;
         break;
       }
       newMessage = false;
@@ -327,7 +324,6 @@ void controlWalle(char command)
     if (!SerialBT.connected())
     {
       command = ' ';
-      velocidade1 = 0;
       break;
     }
   }
